@@ -7,7 +7,6 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.fragment.app.Fragment
-import com.bumptech.glide.Glide
 
 class ProductDetailsFragment : Fragment() {
 
@@ -39,7 +38,7 @@ class ProductDetailsFragment : Fragment() {
 
         txtViewTitle.text = product?.title
         txtViewDesc.text = product?.description
-        txtViewPrice.text = product?.price.toString()
-        Glide.with(requireContext()).load(product?.thumbnail).into(imgView)
+        txtViewPrice.text = product?.price
+        product?.thumbnail?.let { imgView.setImageResource(it) }
     }
 }
