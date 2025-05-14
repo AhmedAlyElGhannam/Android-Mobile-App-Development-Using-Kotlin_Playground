@@ -20,8 +20,8 @@ private constructor() {
         productService = retrofit.create(ProductService::class.java)
     }
 
-    fun makeNetworkCall() : List<Product>? {
-        return productService.products?.execute()?.body()?.products
+    suspend fun makeNetworkCall() : List<Product>? {
+        return productService.getProducts()?.body()?.products
     }
 
     companion object {

@@ -1,12 +1,17 @@
 package com.example.task_01
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.core.content.ContextCompat.getSystemService
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.LiveData
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.work.Constraints
@@ -16,13 +21,15 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class ListOfProductsFragments : Fragment(){
     lateinit var recyclerView: RecyclerView
     lateinit var recyclerAdapter: ProductListAdapter
     lateinit var communicator : Communicator
-    private var listOfProducts : List<Product> = emptyList()
-
+    private var listOfProducts : List<Product>? = emptyList()
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -31,36 +38,57 @@ class ListOfProductsFragments : Fragment(){
     ): View? {
         val view : View = inflater.inflate(R.layout.list_frag, container, false)
 
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
+        val connectivityManager = requireContext().getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val networkCapabilities = connectivityManager.activeNetwork?.let {
+            connectivityManager.getNetworkCapabilities(it)
+        }
 
-        val request = OneTimeWorkRequestBuilder<MyWorker>().setConstraints(constraints).build()
+        val isConnected = networkCapabilities?.let {
+            it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                    it.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+        } ?: false
 
-        WorkManager.getInstance(requireContext()).enqueue(request)
-
-        val result : LiveData<WorkInfo> = WorkManager.getInstance(requireContext()).getWorkInfoByIdLiveData(request.id)
-
-        result.observe(viewLifecycleOwner) { workInfo ->
-            when (workInfo.state) {
-                WorkInfo.State.FAILED -> {
-                    Log.i("TAG", "onCreate: FAILED")
+        if (isConnected) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    val client : ProductClient? = ProductClient.instance
+                    val dao : ProductDAO = LocalRoomDB.getInstance(requireContext()).getProductDao()
+                    listOfProducts = client?.makeNetworkCall()
+                    if (listOfProducts.isNullOrEmpty()) {
+                        Log.i("TAG", "onCreateView: $listOfProducts")
+                    }
+                    else {
+                        // store in local db
+                        for (i in 0 until listOfProducts!!.size) {
+                            dao.insertProduct(listOfProducts!![i])
+                        }
+                        withContext(Dispatchers.Main) {
+                            recyclerAdapter.submitList(listOfProducts)
+                        }
+                    }
                 }
-                WorkInfo.State.SUCCEEDED -> {
-                    Log.i("TAG", "onCreate: SUCCEEDED")
-                    var jsonStr = workInfo.outputData.getString("ProductsJson")
-                    if (jsonStr != null) {
-                        val type = object : TypeToken<List<Product>>() {}.type
-                        listOfProducts = Gson().fromJson(jsonStr, type)
+                catch (_: Throwable) {
+                    Log.i("TAG", "onCreateView: error while fetching via retrofit")
+                }
+            }
+        }
+        else {
+            lifecycleScope.launch {
+                val dao : ProductDAO = LocalRoomDB.getInstance(requireContext()).getProductDao()
+                listOfProducts = dao.getAllProducts()
+                if (listOfProducts.isNullOrEmpty()) {
+                    Log.i("TAG", "onCreateView: $listOfProducts")
+                }
+                else {
+                    // populate list with locally-stored elements
+                    withContext(Dispatchers.Main) {
                         recyclerAdapter.submitList(listOfProducts)
                     }
                 }
-                WorkInfo.State.ENQUEUED -> {}
-                WorkInfo.State.RUNNING -> {}
-                WorkInfo.State.BLOCKED -> {}
-                WorkInfo.State.CANCELLED -> {}
             }
         }
+
+
 
         recyclerView = view.findViewById(R.id.recyclerView)
 
